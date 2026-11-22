@@ -32,6 +32,10 @@ code --install-extension opencode-v2-sidebar-0.1.0.vsix
 Reload the window when prompted. The **OpenCode V2** icon appears at the top
 right of the window (Secondary Side Bar). Click it to open the chat.
 
+If you previously sideloaded an older `local.opencode-v2-sidebar` build,
+uninstall it first — two extensions contributing `opencodeV2.chatView` at once
+will conflict.
+
 For local development, run `.\install.ps1` instead — it copies the source into
 `~/.vscode/extensions/Polasie.opencode-v2-sidebar-<version>`.
 
