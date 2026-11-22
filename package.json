@@ -1,0 +1,54 @@
+{
+  "name": "opencode-v2-sidebar",
+  "displayName": "OpenCode V2 Sidebar",
+  "description": "Embed the official OpenCode V2 web UI in the VS Code Secondary Side Bar (right side)",
+  "version": "0.1.0",
+  "publisher": "Polasie",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Polasie/opencode-v2-sidebar.git"
+  },
+  "homepage": "https://github.com/Polasie/opencode-v2-sidebar#readme",
+  "bugs": {
+    "url": "https://github.com/Polasie/opencode-v2-sidebar/issues"
+  },
+  "keywords": [
+    "opencode",
+    "ai",
+    "chat",
+    "sidebar"
+  ],
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:opencodeV2.chatView"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "opencodeV2",
+          "title": "OpenCode V2",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "opencodeV2": [
+        {
+          "type": "webview",
+          "id": "opencodeV2.chatView",
+          "name": "Chat"
+        }
+      ]
+    }
+  }
+}
