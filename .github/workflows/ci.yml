@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - run: npm test
       - run: npx --yes @vscode/vsce package --out /tmp/opencode-v2-sidebar-check.vsix
 
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - name: Package VSIX
         run: |
           VERSION=$(node -p "require('./package.json').version")
