@@ -26,7 +26,7 @@ then either:
 - From a terminal:
 
 ```powershell
-code --install-extension opencode-v2-sidebar-0.2.1.vsix
+code --install-extension opencode-v2-sidebar-0.3.0.vsix
 ```
 
 Reload the window when prompted. The chat view focuses automatically on
@@ -47,6 +47,16 @@ For local development, run `.\install.ps1` instead — it copies the source into
   iframe reloads automatically.
 - **Status indicator** — green dot = connected, red dot = reconnecting or
   disconnected. **Reconnect** is still available manually.
+- **Home session grouping** — sessions are grouped by project (default) or by
+  directory via the `opencodeV2.groupBy` setting. `none` restores the official
+  date grouping. The original UI layout, buttons and handlers are preserved.
+- **Collapsible groups** — click a group header (or right-click →
+  Collapse/Expand) to hide/show its sessions.
+- **Pin** — right-click a group header to Pin/Unpin that project, or right-click
+  a chat row to Pin/Unpin that chat. Pinned items move to the top instantly,
+  marked with a small SVG pin icon. Right-click a chat → **More actions…** still
+  opens the official OpenCode menu (rename/archive/delete, etc.). Pin and
+  collapse state persist in the webview's localStorage.
 
 ## Commands
 
@@ -62,6 +72,10 @@ Available from the Command Palette (`Ctrl+Shift+P`):
 3. The extension starts a loopback-only proxy on `127.0.0.1:<random port>` that
    injects `Authorization: Basic ...` into requests and streams the official
    web UI into a webview (including WebSocket upgrades).
+4. For grouping/collapse/pin, the proxy patches only the official JS asset in
+   memory (`ui-patch.js`). Pin ordering uses CSS `order` on the rendered rows —
+   DOM nodes are never moved, so the official UI stays intact and no iframe
+   reload is needed.
 
 Nothing is sent to a third party, and no password is stored by this extension.
 The proxy code lives in `proxy.js` and is covered by unit tests.
@@ -80,7 +94,7 @@ npm test
 npx --yes @vscode/vsce package
 ```
 
-Pushing a tag like `v0.2.1` makes GitHub Actions run the tests, package the
+Pushing a tag like `v0.3.0` makes GitHub Actions run the tests, package the
 VSIX, and attach it to the release automatically.
 
 ## ภาษาไทย (ย่อ)
@@ -90,6 +104,8 @@ VSIX, and attach it to the release automatically.
 ต้องมี OpenCode v2 และ `opencode service` รันอยู่ ตัวต่อจะเปิดเองตอน start
 และตรวจสุขภาพ service ทุก 15 วินาที ถ้า restart หรือเปลี่ยนรหัสผ่านจะ reconnect
 เองอัตโนมัติ (ยังกด **Reconnect** ได้เหมือนเดิม)
+หน้า Home จะจัดแชทตามโปรเจกต์/โฟลเดอร์ได้ กดหัวข้อเพื่อยุบ/ขยาย และคลิกขวาเพื่อ Pin
+ทั้ง group และแชทได้ โดยไม่รบกวนปุ่มเดิมของ OpenCode
 
 ## License
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- Group Home sessions by project or directory inside the official embedded UI
+  without changing the webview HTML/CSS. Configurable with
+  `opencodeV2.groupBy` (`project` / `directory` / `none`).
+- Add collapsible group headers (click, or right-click → Collapse/Expand).
+- Add right-click Pin/Unpin for both project groups and individual chats.
+  Pinned items move to the top instantly via CSS `order` — no DOM moves and no
+  iframe reload. A small SVG pin icon marks pinned items.
+- Keep the official context menu available through **More actions…** on chats.
+- Add unit tests for UI patching, collapse, pin and compressed proxy assets.
+
 ## 0.2.1
 
 - Fix the startup focus command: use the view-container open command with

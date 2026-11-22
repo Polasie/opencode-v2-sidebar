@@ -17,7 +17,9 @@ async function ensureProxy(force, service) {
   if (!force && proxyServer) return proxyBaseUrl;
 
   const nextService = service || (await proxyModule.resolveService());
-  const next = await proxyModule.createProxy(nextService);
+  const next = await proxyModule.createProxy(nextService, {
+    log: (message) => output?.appendLine(message),
+  });
   const previous = proxyServer;
 
   proxyServer = next.server;
@@ -233,6 +235,23 @@ async function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand("opencodeV2.reconnect", () => reconnect(provider, "command"))
   );
+
+  const configuredMode = vscode.workspace
+    .getConfiguration("opencodeV2")
+    .get("groupBy", "project");
+  proxyModule.setGroupBy(configuredMode);
+  output.appendLine(`Session grouping mode: ${proxyModule.getGroupBy()}`);
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (!event.affectsConfiguration("opencodeV2.groupBy")) return;
+      const mode = vscode.workspace.getConfiguration("opencodeV2").get("groupBy", "project");
+      proxyModule.setGroupBy(mode);
+      output.appendLine(`Session grouping mode changed to ${proxyModule.getGroupBy()}`);
+      if (proxyBaseUrl) provider.post({ type: "reload", url: proxyBaseUrl });
+    })
+  );
+
   context.subscriptions.push({
     dispose() {
       stopMonitor();

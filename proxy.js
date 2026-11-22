@@ -2,9 +2,20 @@ const http = require("http");
 const https = require("https");
 const os = require("os");
 const path = require("path");
+const zlib = require("zlib");
 const { execFile } = require("child_process");
+const uiPatch = require("./ui-patch");
 
 let currentService = null;
+let currentGroupBy = "project";
+
+function setGroupBy(mode) {
+  currentGroupBy = uiPatch.normalizeMode(mode);
+}
+
+function getGroupBy() {
+  return currentGroupBy;
+}
 
 function cliCandidates() {
   return [
@@ -101,24 +112,95 @@ function writeUpgradeResponse(socket, upstreamResponse) {
   socket.write(raw + "\r\n");
 }
 
-function createProxy(service) {
+function isJsAsset(reqUrl) {
+  try {
+    return new URL(reqUrl, "http://127.0.0.1").pathname.endsWith(".js");
+  } catch {
+    return false;
+  }
+}
+
+function decodeBody(buffer, headers) {
+  const encoding = String(headers["content-encoding"] || "").toLowerCase();
+  if (encoding.includes("gzip") || (buffer.length > 1 && buffer[0] === 0x1f && buffer[1] === 0x8b)) {
+    return zlib.gunzipSync(buffer);
+  }
+  if (encoding.includes("br")) return zlib.brotliDecompressSync(buffer);
+  if (encoding.includes("deflate")) return zlib.inflateSync(buffer);
+  return buffer;
+}
+
+function patchedHeaders(upHeaders, body) {
+  const headers = { ...upHeaders };
+  for (const key of [
+    "content-encoding",
+    "content-length",
+    "transfer-encoding",
+    "etag",
+    "last-modified",
+  ]) {
+    delete headers[key];
+  }
+  headers["content-length"] = String(body.length);
+  headers["cache-control"] = "no-store";
+  return headers;
+}
+
+function createProxy(service, options = {}) {
   const transport = service.url.protocol === "https:" ? https : http;
   const target = targetFor(service);
 
   const server = http.createServer((req, res) => {
+    const transform = req.method === "GET" && isJsAsset(req.url);
+    const requestHeaders = authHeaders(service, req.headers);
+    if (transform) delete requestHeaders["accept-encoding"];
+
     const upstream = transport.request(
       {
         ...target,
         path: req.url,
         method: req.method,
-        headers: authHeaders(service, req.headers),
+        headers: requestHeaders,
       },
       (upRes) => {
-        res.writeHead(upRes.statusCode || 502, {
-          ...upRes.headers,
-          "cache-control": "no-store",
+        if (!transform) {
+          res.writeHead(upRes.statusCode || 502, {
+            ...upRes.headers,
+            "cache-control": "no-store",
+          });
+          upRes.pipe(res);
+          return;
+        }
+
+        const chunks = [];
+        upRes.on("data", (chunk) => chunks.push(chunk));
+        upRes.on("end", () => {
+          const raw = Buffer.concat(chunks);
+          let body = raw;
+          let headers = { ...upRes.headers, "cache-control": "no-store" };
+          try {
+            body = decodeBody(raw, upRes.headers);
+            const result = uiPatch.patchUiAsset(body.toString("utf8"), {
+              groupBy: currentGroupBy,
+            });
+            body = Buffer.from(result.source, "utf8");
+            headers = patchedHeaders(upRes.headers, body);
+            if (result.patched) {
+              options.log?.(`UI grouping patch applied (${result.mode})`);
+            } else if (result.reason !== "grouping disabled") {
+              options.log?.(`UI grouping patch skipped: ${result.reason}`);
+            }
+          } catch (error) {
+            options.log?.(`UI grouping patch failed: ${error.message}`);
+            body = raw;
+          }
+          res.writeHead(upRes.statusCode || 502, headers);
+          res.end(body);
         });
-        upRes.pipe(res);
+        upRes.on("error", () => {
+          if (!res.headersSent) res.writeHead(502);
+          res.end();
+        });
       }
     );
     upstream.on("error", (error) => {
@@ -198,6 +280,8 @@ module.exports = {
   resolveService,
   setService,
   getService,
+  setGroupBy,
+  getGroupBy,
   serviceSignature,
   authHeaders,
   createProxy,

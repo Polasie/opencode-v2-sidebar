@@ -2,7 +2,7 @@
   "name": "opencode-v2-sidebar",
   "displayName": "OpenCode V2 Sidebar",
   "description": "Embed the official OpenCode V2 web UI in the VS Code Secondary Side Bar (right side)",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "Polasie",
   "license": "MIT",
   "repository": {
@@ -64,6 +64,17 @@
           "name": "Chat"
         }
       ]
+    },
+    "configuration": {
+      "title": "OpenCode V2 Sidebar",
+      "properties": {
+        "opencodeV2.groupBy": {
+          "type": "string",
+          "enum": ["project", "directory", "none"],
+          "default": "project",
+          "description": "Group sessions in the embedded OpenCode Home page by project or directory. 'none' keeps the official date grouping."
+        }
+      }
     }
   }
 }
