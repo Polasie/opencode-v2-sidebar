@@ -26,7 +26,7 @@ then either:
 - From a terminal:
 
 ```powershell
-code --install-extension opencode-v2-sidebar-0.2.0.vsix
+code --install-extension opencode-v2-sidebar-0.2.1.vsix
 ```
 
 Reload the window when prompted. The chat view focuses automatically on
@@ -80,7 +80,7 @@ npm test
 npx --yes @vscode/vsce package
 ```
 
-Pushing a tag like `v0.2.0` makes GitHub Actions run the tests, package the
+Pushing a tag like `v0.2.1` makes GitHub Actions run the tests, package the
 VSIX, and attach it to the release automatically.
 
 ## ภาษาไทย (ย่อ)

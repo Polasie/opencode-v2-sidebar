@@ -202,10 +202,19 @@ function stopMonitor() {
 }
 
 async function focusView() {
-  try {
-    await vscode.commands.executeCommand("workbench.view.extension.opencodeV2.focus");
-  } catch (error) {
-    output?.appendLine(`Focus failed: ${error.message}`);
+  const candidates = [
+    "workbench.view.extension.opencodeV2",
+    "opencodeV2.chatView.focus",
+    "workbench.action.focusAuxiliaryBar",
+  ];
+  for (const command of candidates) {
+    try {
+      await vscode.commands.executeCommand(command);
+      output?.appendLine(`Focused view via ${command}`);
+      return;
+    } catch (error) {
+      output?.appendLine(`Focus via ${command} failed: ${error.message}`);
+    }
   }
 }
 

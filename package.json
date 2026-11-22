@@ -2,7 +2,7 @@
   "name": "opencode-v2-sidebar",
   "displayName": "OpenCode V2 Sidebar",
   "description": "Embed the official OpenCode V2 web UI in the VS Code Secondary Side Bar (right side)",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "Polasie",
   "license": "MIT",
   "repository": {

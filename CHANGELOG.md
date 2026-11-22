@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Fix the startup focus command: use the view-container open command with
+  fallbacks instead of the non-existent `...focus` command.
+
 ## 0.2.0
 
 - Focus the OpenCode V2 view automatically after startup.
