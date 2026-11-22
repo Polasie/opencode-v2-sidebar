@@ -2,7 +2,7 @@
   "name": "opencode-v2-sidebar",
   "displayName": "OpenCode V2 Sidebar",
   "description": "Embed the official OpenCode V2 web UI in the VS Code Secondary Side Bar (right side)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "Polasie",
   "license": "MIT",
   "repository": {
@@ -27,11 +27,26 @@
     "Other"
   ],
   "main": "./extension.js",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "activationEvents": [
     "onStartupFinished",
-    "onView:opencodeV2.chatView"
+    "onView:opencodeV2.chatView",
+    "onCommand:opencodeV2.focus",
+    "onCommand:opencodeV2.reconnect"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "opencodeV2.focus",
+        "title": "OpenCode V2: Focus Chat"
+      },
+      {
+        "command": "opencodeV2.reconnect",
+        "title": "OpenCode V2: Reconnect"
+      }
+    ],
     "viewsContainers": {
       "secondarySidebar": [
         {

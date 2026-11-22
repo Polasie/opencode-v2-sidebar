@@ -1,179 +1,55 @@
 const vscode = require("vscode");
-const http = require("http");
-const https = require("https");
-const os = require("os");
-const path = require("path");
-const { execFile } = require("child_process");
+const proxyModule = require("./proxy");
 
+const CHECK_INTERVAL_MS = 15000;
+
+let output = null;
 let proxyServer = null;
 let proxyBaseUrl = null;
-let output = null;
+let monitorTimer = null;
+let checking = false;
 
-function cliCandidates() {
-  return [
-    "opencode",
-    path.join(os.homedir(), ".opencode", "bin", "opencode.exe"),
-    path.join(os.homedir(), ".opencode", "bin", "opencode"),
-  ];
+function escapeHtml(value) {
+  return String(value).replace(/[<>&]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[char]);
 }
 
-function runOpenCode(args) {
-  return new Promise((resolve, reject) => {
-    const candidates = cliCandidates();
-    const attempt = (index) => {
-      if (index >= candidates.length) {
-        reject(new Error("OpenCode CLI not found (tried PATH and ~/.opencode/bin)"));
-        return;
-      }
-      execFile(
-        candidates[index],
-        args,
-        { timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 },
-        (error, stdout, stderr) => {
-          if (!error) {
-            resolve(stdout.trim());
-            return;
-          }
-          if (error.code === "ENOENT") {
-            attempt(index + 1);
-            return;
-          }
-          reject(new Error((stderr || error.message || "OpenCode CLI failed").trim()));
-        }
-      );
-    };
-    attempt(0);
-  });
-}
+async function ensureProxy(force, service) {
+  if (!force && proxyServer) return proxyBaseUrl;
 
-async function resolveService() {
-  const status = await runOpenCode(["service", "status"]);
-  const urlText = status
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => /^https?:\/\//.test(line));
-  if (!urlText) {
-    throw new Error("Could not read OpenCode service URL from `opencode service status`");
-  }
-  const password = (await runOpenCode(["service", "get", "password"])).trim();
-  return { url: new URL(urlText), password };
-}
+  const nextService = service || (await proxyModule.resolveService());
+  const next = await proxyModule.createProxy(nextService);
+  const previous = proxyServer;
 
-function authHeaders(service, extra) {
-  const token = Buffer.from(`opencode:${service.password}`).toString("base64");
-  return {
-    ...(extra || {}),
-    host: service.url.host,
-    authorization: `Basic ${token}`,
-  };
-}
+  proxyServer = next.server;
+  proxyBaseUrl = next.url;
+  proxyModule.setService(nextService);
 
-function writeUpgradeResponse(socket, upstreamResponse) {
-  let raw = "HTTP/1.1 101 Switching Protocols\r\n";
-  for (const [key, value] of Object.entries(upstreamResponse.headers || {})) {
-    raw += `${key}: ${value}\r\n`;
-  }
-  socket.write(raw + "\r\n");
-}
-
-async function createProxy() {
-  const service = await resolveService();
-  const transport = service.url.protocol === "https:" ? https : http;
-  const target = {
-    hostname: service.url.hostname,
-    port: service.url.port || (service.url.protocol === "https:" ? 443 : 80),
-  };
-
-  const server = http.createServer((req, res) => {
-    const upstream = transport.request(
-      {
-        ...target,
-        path: req.url,
-        method: req.method,
-        headers: authHeaders(service, req.headers),
-      },
-      (upRes) => {
-        const headers = { ...upRes.headers, "cache-control": "no-store" };
-        res.writeHead(upRes.statusCode || 502, headers);
-        upRes.pipe(res);
-      }
-    );
-    upstream.on("error", (error) => {
-      if (!res.headersSent) {
-        res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-      }
-      res.end(`OpenCode proxy error: ${error.message}`);
-      output?.appendLine(`Proxy request error: ${error.message}`);
-    });
-    req.pipe(upstream);
-  });
-
-  server.on("upgrade", (req, clientSocket, head) => {
-    const upstream = transport.request({
-      ...target,
-      path: req.url,
-      method: "GET",
-      headers: authHeaders(service, req.headers),
-    });
-    upstream.on("upgrade", (upRes, upSocket, upHead) => {
-      writeUpgradeResponse(clientSocket, upRes);
-      if (upHead && upHead.length) clientSocket.write(upHead);
-      if (head && head.length) upSocket.write(head);
-      upSocket.pipe(clientSocket);
-      clientSocket.pipe(upSocket);
-    });
-    upstream.on("response", (upRes) => {
-      let raw = `HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage || ""}\r\n`;
-      for (const [key, value] of Object.entries(upRes.headers || {})) {
-        raw += `${key}: ${value}\r\n`;
-      }
-      clientSocket.write(raw + "\r\n");
-      upRes.pipe(clientSocket);
-    });
-    upstream.on("error", () => clientSocket.destroy());
-    upstream.end();
-  });
-
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-
-  const address = server.address();
-  return {
-    server,
-    url: `http://127.0.0.1:${address.port}`,
-    target: service.url.toString(),
-  };
-}
-
-async function ensureProxy(force) {
-  if (force) {
-    proxyServer?.close();
-    proxyServer = null;
-    proxyBaseUrl = null;
-  }
-  if (!proxyServer) {
-    const proxy = await createProxy();
-    proxyServer = proxy.server;
-    proxyBaseUrl = proxy.url;
-    output?.appendLine(`OpenCode V2 proxy ${proxy.url} -> ${proxy.target}`);
-  }
+  if (previous) previous.close();
+  output?.appendLine(`OpenCode V2 proxy ${next.url} -> ${next.target}`);
   return proxyBaseUrl;
 }
 
-function webviewHtml(baseUrl) {
+function closeProxy() {
+  proxyServer?.close();
+  proxyServer = null;
+  proxyBaseUrl = null;
+}
+
+function webviewHtml(baseUrl, statusText, ok) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http://127.0.0.1:*; child-src http://127.0.0.1:*; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src http://127.0.0.1:* data:; connect-src http://127.0.0.1:*;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src http://127.0.0.1:* https://127.0.0.1:*; child-src http://127.0.0.1:* https://127.0.0.1:*; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src http://127.0.0.1:* https://127.0.0.1:* data:; connect-src http://127.0.0.1:* https://127.0.0.1:*;" />
 <style>
   html, body { height: 100%; margin: 0; overflow: hidden; }
   body { display: flex; flex-direction: column; font-family: var(--vscode-font-family); }
   header { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-bottom: 1px solid var(--vscode-panel-border); flex: 0 0 auto; }
   button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border: 0; padding: 3px 8px; cursor: pointer; border-radius: 2px; font-size: 11px; }
   button:hover { background: var(--vscode-button-hoverBackground); }
+  #dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  #dot.ok { background: #3fb950; }
+  #dot.bad { background: #f85149; }
   #status { color: var(--vscode-descriptionForeground); font-size: 11px; margin-left: auto; }
   #frame { flex: 1 1 auto; width: 100%; border: 0; min-height: 0; }
 </style>
@@ -181,23 +57,32 @@ function webviewHtml(baseUrl) {
 <body>
 <header>
   <button id="reconnect" title="Re-read OpenCode service URL and password">Reconnect</button>
-  <span id="status">OpenCode V2</span>
+  <span id="dot" class="${ok ? "ok" : "bad"}"></span>
+  <span id="status">${escapeHtml(statusText)}</span>
 </header>
 <iframe id="frame" title="OpenCode V2" src="${baseUrl}/"></iframe>
 <script>
   const vscode = acquireVsCodeApi();
+  const dot = document.getElementById("dot");
+  const status = document.getElementById("status");
   document.getElementById("reconnect").addEventListener("click", () => {
-    document.getElementById("status").textContent = "Reconnecting…";
+    status.textContent = "Reconnecting…";
+    dot.className = "bad";
     vscode.postMessage({ type: "reconnect" });
   });
   window.addEventListener("message", (event) => {
     const message = event.data;
-    if (message && message.type === "reload") {
-      document.getElementById("status").textContent = "OpenCode V2";
+    if (!message) return;
+    if (message.type === "status") {
+      status.textContent = message.text;
+      dot.className = message.ok ? "ok" : "bad";
+    }
+    if (message.type === "reload") {
       document.getElementById("frame").src = message.url + "/?t=" + Date.now();
     }
-    if (message && message.type === "error") {
-      document.getElementById("status").textContent = message.message;
+    if (message.type === "error") {
+      status.textContent = message.message;
+      dot.className = "bad";
     }
   });
 </script>
@@ -206,13 +91,26 @@ function webviewHtml(baseUrl) {
 }
 
 class OpenCodeV2ViewProvider {
-  constructor(extensionUri, outputChannel) {
-    this.extensionUri = extensionUri;
+  constructor(outputChannel) {
     this.output = outputChannel;
     this.view = null;
+    this.statusText = null;
+    this.statusOk = null;
   }
 
-  async resolveWebviewView(webviewView, context, token) {
+  post(message) {
+    if (!this.view) return;
+    Promise.resolve(this.view.webview.postMessage(message)).catch(() => {});
+  }
+
+  setStatus(text, ok) {
+    if (this.statusText === text && this.statusOk === ok) return;
+    this.statusText = text;
+    this.statusOk = ok;
+    this.post({ type: "status", text, ok });
+  }
+
+  async resolveWebviewView(webviewView) {
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
@@ -221,13 +119,7 @@ class OpenCodeV2ViewProvider {
     };
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (!message || message.type !== "reconnect") return;
-      try {
-        const url = await ensureProxy(true);
-        webviewView.webview.postMessage({ type: "reload", url });
-      } catch (error) {
-        this.output.appendLine(`Reconnect failed: ${error.message}`);
-        webviewView.webview.postMessage({ type: "error", message: error.message });
-      }
+      await reconnect(this, "manual");
     });
     await this.render();
   }
@@ -236,36 +128,116 @@ class OpenCodeV2ViewProvider {
     if (!this.view) return;
     try {
       const url = await ensureProxy(false);
-      this.view.webview.html = webviewHtml(url);
+      this.statusText = "Connected";
+      this.statusOk = true;
+      this.view.webview.html = webviewHtml(url, this.statusText, this.statusOk);
     } catch (error) {
+      this.statusText = "Disconnected";
+      this.statusOk = false;
       this.output.appendLine(`Startup failed: ${error.message}`);
       this.view.webview.html = `<!DOCTYPE html><html><body style="font-family:var(--vscode-font-family);padding:12px">
-        <h3>OpenCode V2</h3><p>${String(error.message).replace(/[<>&]/g, "")}</p>
+        <h3>OpenCode V2</h3><p>${escapeHtml(error.message)}</p>
         <p>ตรวจสอบว่า <code>opencode service status</code> ทำงานได้</p></body></html>`;
     }
+  }
+}
+
+async function reconnect(provider, reason, service) {
+  provider.setStatus("Reconnecting…", false);
+  try {
+    const url = await ensureProxy(true, service);
+    provider.post({ type: "reload", url });
+    provider.setStatus("Connected", true);
+    output?.appendLine(`Reconnected (${reason}) -> ${url}`);
+  } catch (error) {
+    provider.setStatus("Disconnected", false);
+    provider.post({ type: "error", message: error.message });
+    output?.appendLine(`Reconnect failed (${reason}): ${error.message}`);
+  }
+}
+
+async function checkService(provider) {
+  if (!provider.view || checking) return;
+  checking = true;
+  try {
+    const active = proxyModule.getService();
+    if (!active) {
+      await reconnect(provider, "initial");
+      return;
+    }
+
+    const healthy = await proxyModule.probeService(active);
+    if (!healthy) {
+      await reconnect(provider, "health check failed");
+      return;
+    }
+
+    provider.setStatus("Connected", true);
+    try {
+      const latest = await proxyModule.resolveService();
+      if (proxyModule.serviceSignature(latest) !== proxyModule.serviceSignature(active)) {
+        await reconnect(provider, "credentials changed", latest);
+      }
+    } catch (error) {
+      output?.appendLine(`Service refresh skipped: ${error.message}`);
+    }
+  } catch (error) {
+    output?.appendLine(`Monitor error: ${error.message}`);
+  } finally {
+    checking = false;
+  }
+}
+
+function startMonitor(provider) {
+  stopMonitor();
+  monitorTimer = setInterval(() => void checkService(provider), CHECK_INTERVAL_MS);
+  monitorTimer.unref?.();
+}
+
+function stopMonitor() {
+  if (monitorTimer) {
+    clearInterval(monitorTimer);
+    monitorTimer = null;
+  }
+}
+
+async function focusView() {
+  try {
+    await vscode.commands.executeCommand("workbench.view.extension.opencodeV2.focus");
+  } catch (error) {
+    output?.appendLine(`Focus failed: ${error.message}`);
   }
 }
 
 async function activate(context) {
   output = vscode.window.createOutputChannel("OpenCode V2 Sidebar");
   context.subscriptions.push(output);
-  const provider = new OpenCodeV2ViewProvider(context.extensionUri, output);
+
+  const provider = new OpenCodeV2ViewProvider(output);
+
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("opencodeV2.chatView", provider)
   );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("opencodeV2.focus", () => focusView())
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand("opencodeV2.reconnect", () => reconnect(provider, "command"))
+  );
   context.subscriptions.push({
     dispose() {
-      proxyServer?.close();
-      proxyServer = null;
-      proxyBaseUrl = null;
+      stopMonitor();
+      closeProxy();
     },
   });
+
+  startMonitor(provider);
+  setTimeout(() => void focusView(), 50);
 }
 
 function deactivate() {
-  proxyServer?.close();
-  proxyServer = null;
-  proxyBaseUrl = null;
+  stopMonitor();
+  closeProxy();
 }
 
 module.exports = { activate, deactivate };
